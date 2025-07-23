@@ -1,0 +1,76 @@
+-- Create the database
+CREATE DATABASE bug_bounty_db;
+USE bug_bounty_db;
+
+-- Users table
+CREATE TABLE users (
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE,
+    email VARCHAR(100) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100) NOT NULL,
+    role ENUM('admin', 'user', 'researcher') NOT NULL DEFAULT 'user',
+    profile_image VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Bug reports table
+CREATE TABLE bug_reports (
+    report_id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(100) NOT NULL,
+    description TEXT NOT NULL,
+    severity ENUM('low', 'medium', 'high', 'critical') NOT NULL,
+    status ENUM('new', 'in_progress', 'fixed', 'rejected', 'duplicate') NOT NULL DEFAULT 'new',
+    reported_by INT NOT NULL,
+    assigned_to INT,
+    attachment_path VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (reported_by) REFERENCES users(user_id) ON DELETE CASCADE,
+    FOREIGN KEY (assigned_to) REFERENCES users(user_id) ON DELETE SET NULL
+);
+
+-- Comments table
+CREATE TABLE comments (
+    comment_id INT AUTO_INCREMENT PRIMARY KEY,
+    report_id INT NOT NULL,
+    user_id INT NOT NULL,
+    comment TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (report_id) REFERENCES bug_reports(report_id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+);
+
+-- Insert dummy data for users
+INSERT INTO users (username, email, password, full_name, role) VALUES
+('admin', 'admin@example.com', '$2y$10$IzA.M9.bxZrCvHIj1ByZ5uQYB8cZFBCXlPtCQqz2K6TlLYw2KGaWO', 'Admin User', 'admin'), -- password: admin123
+('researcher1', 'researcher1@example.com', '$2y$10$IzA.M9.bxZrCvHIj1ByZ5uQYB8cZFBCXlPtCQqz2K6TlLYw2KGaWO', 'John Doe', 'researcher'),
+('researcher2', 'researcher2@example.com', '$2y$10$IzA.M9.bxZrCvHIj1ByZ5uQYB8cZFBCXlPtCQqz2K6TlLYw2KGaWO', 'Jane Smith', 'researcher'),
+('user1', 'user1@example.com', '$2y$10$IzA.M9.bxZrCvHIj1ByZ5uQYB8cZFBCXlPtCQqz2K6TlLYw2KGaWO', 'Robert Johnson', 'user'),
+('user2', 'user2@example.com', '$2y$10$IzA.M9.bxZrCvHIj1ByZ5uQYB8cZFBCXlPtCQqz2K6TlLYw2KGaWO', 'Emily Davis', 'user');
+
+-- Insert dummy data for bug reports
+INSERT INTO bug_reports (title, description, severity, status, reported_by, assigned_to) VALUES
+('SQL Injection Vulnerability', 'Found SQL injection vulnerability in login form that allows bypassing authentication', 'critical', 'new', 2, NULL),
+('Cross-Site Scripting (XSS) in Comments', 'Stored XSS vulnerability in the comments section', 'high', 'in_progress', 2, 1),
+('CSRF Protection Missing', 'The form submissions are not protected against CSRF attacks', 'medium', 'new', 3, NULL),
+('Insecure Direct Object Reference', 'Users can access other users\' data by manipulating the ID parameter', 'high', 'fixed', 2, 1),
+('Weak Password Policy', 'System allows simple passwords like "123456"', 'low', 'new', 3, NULL),
+('Session Fixation Vulnerability', 'Session ID is not regenerated after login', 'medium', 'in_progress', 2, 1),
+('Open Redirect Vulnerability', 'The redirect parameter can be manipulated to redirect to malicious sites', 'medium', 'new', 3, NULL),
+('Server Information Disclosure', 'Error messages reveal sensitive server information', 'low', 'fixed', 2, 1),
+('Unrestricted File Upload', 'File upload feature allows uploading of executable files', 'critical', 'in_progress', 3, 1),
+('Broken Access Control', 'Regular users can access admin functionality by directly accessing URLs', 'high', 'new', 2, NULL);
+
+-- Insert dummy data for comments
+INSERT INTO comments (report_id, user_id, comment) VALUES
+(1, 1, 'We will look into this immediately. Thanks for reporting.'),
+(1, 2, 'I can provide more details if needed.'),
+(2, 1, 'Working on a fix. Will be deployed soon.'),
+(2, 3, 'I found the same issue in another section too.'),
+(4, 1, 'Fixed in the latest deployment.'),
+(6, 1, 'Can you provide more reproduction steps?'),
+(6, 2, 'Sure, I\'ll send you the detailed steps.'),
+(8, 1, 'This has been fixed now. Thank you.'),
+(9, 1, 'This is a priority issue. We\'re working on it.'),
+(9, 3, 'Let me know if you need more information.');

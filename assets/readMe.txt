@@ -1,0 +1,25 @@
+/bug_bounty
+    /assets
+        /css
+        /js
+        /uploads
+    /config
+        db_connect.php
+    /includes
+        header.php
+        footer.php
+        functions.php
+        auth_functions.php
+        admin_functions.php
+    /admin
+        index.php
+        manage_users.php
+        manage_reports.php
+    index.php
+    login.php
+    register.php
+    dashboard.php
+    profile.php
+    submit_report.php
+    view_report.php
+    logout.php

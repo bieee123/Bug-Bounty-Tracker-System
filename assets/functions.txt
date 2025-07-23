@@ -1,0 +1,89 @@
+// Function to return status color
+function get_status_color($status) {
+    switch ($status) {
+        case 'active':
+            return 'success'; // Green
+        case 'inactive':
+            return 'warning'; // Yellow
+        case 'banned':
+            return 'danger'; // Red
+        default:
+            return 'secondary'; // Grey for unknown
+    }
+}
+
+// Function to return priority color
+function get_priority_color($priority) {
+    switch ($priority) {
+        case 'high':
+            return 'danger'; // Red
+        case 'medium':
+            return 'warning'; // Yellow
+        case 'low':
+            return 'success'; // Green
+        default:
+            return 'secondary'; // Grey for unknown
+    }
+}
+
+// Function to get status color for users
+function get_status_color_user($status) {
+    switch ($status) {
+        case 'active':
+            return 'success'; // Green for active
+        case 'inactive':
+            return 'warning'; // Yellow for inactive
+        case 'banned':
+            return 'danger'; // Red for banned
+        default:
+            return 'default'; // Grey for unknown status
+    }
+}
+
+// Function to get status color for role
+function get_role_color_user($role) {
+    switch ($role) {
+        case 'admin':
+            return 'danger';  // Red for admin
+        case 'researcher':
+            return 'info';  // Light blue for researcher
+        case 'user':
+            return 'primary';  // Blue for regular user
+        default:
+            return 'default';  // Grey for unknown roles
+    }
+}
+
+// Convert severity to label class
+function get_severity_class($severity) {
+    switch ($severity) {
+        case 'critical':
+            return 'danger';
+        case 'high':
+            return 'warning';
+        case 'medium':
+            return 'info';
+        case 'low':
+            return 'success';
+        default:
+            return 'secondary';
+    }
+}
+
+// Convert status to label class
+function get_status_class($status) {
+    switch ($status) {
+        case 'new':
+            return 'primary';
+        case 'in_progress':
+            return 'info';
+        case 'fixed':
+            return 'success';
+        case 'rejected':
+            return 'danger';
+        case 'duplicate':
+            return 'warning';
+        default:
+            return 'secondary';
+    }
+}

@@ -1,0 +1,478 @@
+<?php
+// view_report.php
+require_once 'includes/header.php';
+require_once 'includes/functions.php';
+require_once 'config/db_connect.php';
+
+$conn = new mysqli($db_host, $db_user, $db_pass, $db_name);
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+}
+
+// Enable error reporting for debugging
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+
+// Get user_id from session
+$user_id = isset($_SESSION['user_id']) ? $_SESSION['user_id'] : 0;
+
+// Check if user is logged in
+if (!isset($_SESSION['user_id'])) {
+    header("Location: login.php");
+    exit();
+}
+
+// Delete comments
+if (isset($_POST['delete_comment'])) {
+    $comment_id = $_POST['comment_id'];
+    $user_id = $_SESSION['user_id']; // ID user yang sedang login
+    
+    // Tambahkan try-catch untuk menangkap error
+    try {
+        $checkComment = $conn->prepare("SELECT user_id FROM comments WHERE id = ?");
+        if (!$checkComment) {
+            throw new Exception("Error preparing statement: " . $conn->error);
+        }
+        
+        $checkComment->bind_param("i", $comment_id);
+        if (!$checkComment->execute()) {
+            throw new Exception("Error executing statement: " . $checkComment->error);
+        }
+        
+        $result = $checkComment->get_result();
+        // Proses selanjutnya
+    } catch (Exception $e) {
+        echo "Error: " . $e->getMessage();
+    }
+}
+
+// Fetch report ID from URL
+$report_id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+
+// Define format_date function if it doesn't exist
+if (!function_exists('format_date')) {
+    function format_date($date) {
+        return date('M d, Y h:i A', strtotime($date));
+    }
+}
+
+// Define get_status_color function if it doesn't exist
+if (!function_exists('get_status_color')) {
+    function get_status_color($status) {
+        // Map status to Bootstrap color class
+        switch(strtolower($status)) {
+            case 'open': return 'primary';
+            case 'new': return 'primary';
+            case 'in_progress': return 'warning';
+            case 'fixed': return 'success';
+            case 'resolved': return 'success';
+            case 'closed': return 'secondary';
+            default: return 'secondary';
+        }
+    }
+}
+
+// Define get_user_by_id function if it doesn't exist
+if (!function_exists('get_user_by_id')) {
+    function get_user_by_id($conn, $user_id) {
+        $sql = "SELECT * FROM users WHERE user_id = ?";
+        $stmt = mysqli_prepare($conn, $sql);
+        mysqli_stmt_bind_param($stmt, "i", $user_id);
+        mysqli_stmt_execute($stmt);
+        $result = mysqli_stmt_get_result($stmt);
+        
+        if ($row = mysqli_fetch_assoc($result)) {
+            return $row;
+        }
+        return ['username' => 'Unknown User'];
+    }
+}
+
+if ($report_id > 0) {
+    // Fetch report data
+    $sql = "SELECT r.*, u.username as reporter_name 
+            FROM bug_reports r 
+            JOIN users u ON r.reported_by = u.user_id
+            WHERE r.report_id = ?";
+
+    $stmt = mysqli_prepare($conn, $sql);
+    mysqli_stmt_bind_param($stmt, "i", $report_id);
+    mysqli_stmt_execute($stmt);
+    $result = mysqli_stmt_get_result($stmt);
+    
+    if ($report = mysqli_fetch_assoc($result)) {
+        // Report data found, continue processing
+    } else {
+        $_SESSION['error_message'] = "Report not found.";
+        header("Location: dashboard.php");
+        exit();
+    }
+    
+    mysqli_stmt_close($stmt);
+} else {
+    $_SESSION['error_message'] = "Invalid report ID.";
+    header("Location: dashboard.php");
+    exit();
+}
+
+// Check if user can update status (admin or creator)
+$can_update_status = is_admin() || $report['reported_by'] == $user_id;
+
+// Process status update form
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["update_status"]) && $can_update_status) {
+    $new_status = clean_input($_POST["status"]);
+    $valid_statuses = array('open', 'in_progress', 'fixed', 'closed');
+    
+    if (in_array(strtolower($new_status), $valid_statuses)) {
+        $sql = "UPDATE bug_reports SET status = ? WHERE report_id = ?";
+        $stmt = mysqli_prepare($conn, $sql);
+        mysqli_stmt_bind_param($stmt, "si", $new_status, $report_id);
+        
+        if (mysqli_stmt_execute($stmt)) {
+            $success = "Report status updated successfully!";
+            // Refresh report data
+            $refresh_sql = "SELECT r.*, u.username as reporter_name 
+                           FROM bug_reports r 
+                           JOIN users u ON r.reported_by = u.user_id
+                           WHERE r.report_id = ?";
+            $refresh_stmt = mysqli_prepare($conn, $refresh_sql);
+            mysqli_stmt_bind_param($refresh_stmt, "i", $report_id);
+            mysqli_stmt_execute($refresh_stmt);
+            $refresh_result = mysqli_stmt_get_result($refresh_stmt);
+            $report = mysqli_fetch_assoc($refresh_result);
+            mysqli_stmt_close($refresh_stmt);
+        } else {
+            $error = "Error updating status: " . mysqli_error($conn);
+        }
+        mysqli_stmt_close($stmt);
+    } else {
+        $error = "Invalid status value";
+    }
+}
+
+// Check if user is authorized to edit (report owner or admin)
+$can_edit = is_admin() || $report['reported_by'] == $user_id;
+
+// Check if categories table exists and get categories
+$categories = [];
+$categories_query = "SHOW TABLES LIKE 'categories'";
+$categories_exists = mysqli_query($conn, $categories_query);
+
+if (mysqli_num_rows($categories_exists) > 0) {
+    $categories_query = "SELECT * FROM categories";
+    $categories_result = mysqli_query($conn, $categories_query);
+    
+    if ($categories_result) {
+        while ($category = mysqli_fetch_assoc($categories_result)) {
+            $categories[] = $category;
+        }
+    }
+}
+
+// If no categories are found, provide default options
+if (empty($categories)) {
+    $categories = [
+        ['id' => 1, 'name' => 'Bug'],
+        ['id' => 2, 'name' => 'Feature Request'],
+        ['id' => 3, 'name' => 'Security Issue'],
+        ['id' => 4, 'name' => 'Other']
+    ];
+}
+
+// Process edit form
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["update_report"]) && $can_edit) {
+    // Validate inputs
+    if (empty($_POST["title"])) {
+        $error = "Title is required";
+    } elseif (empty($_POST["description"])) {
+        $error = "Description is required";
+    } else {
+        $title = clean_input($_POST["title"]);
+        $description = clean_input($_POST["description"]);
+        
+        // Check if category field exists in the form
+        $category_field_exists = isset($_POST["category_id"]) || isset($_POST["category"]);
+        $category_value = isset($_POST["category_id"]) ? (int)$_POST["category_id"] : 
+                         (isset($_POST["category"]) ? clean_input($_POST["category"]) : null);
+        
+        // Build SQL query based on available fields
+        if ($category_field_exists && $category_value) {
+            $field_name = isset($_POST["category_id"]) ? "category_id" : "category";
+            $param_type = isset($_POST["category_id"]) ? "i" : "s";
+            
+            $sql = "UPDATE bug_reports SET title = ?, description = ?, $field_name = ?, updated_at = NOW() WHERE report_id = ?";
+            $stmt = mysqli_prepare($conn, $sql);
+            
+            if ($param_type === "i") {
+                mysqli_stmt_bind_param($stmt, "ssis", $title, $description, $category_value, $report_id);
+            } else {
+                mysqli_stmt_bind_param($stmt, "ssss", $title, $description, $category_value, $report_id);
+            }
+        } else {
+            $sql = "UPDATE bug_reports SET title = ?, description = ?, updated_at = NOW() WHERE report_id = ?";
+            $stmt = mysqli_prepare($conn, $sql);
+            mysqli_stmt_bind_param($stmt, "ssi", $title, $description, $report_id);
+        }
+        
+        if (mysqli_stmt_execute($stmt)) {
+            $success = "Report updated successfully!";
+            // Refresh report data
+            $refresh_sql = "SELECT r.*, u.username as reporter_name 
+                           FROM bug_reports r 
+                           JOIN users u ON r.reported_by = u.user_id
+                           WHERE r.report_id = ?";
+            $refresh_stmt = mysqli_prepare($conn, $refresh_sql);
+            mysqli_stmt_bind_param($refresh_stmt, "i", $report_id);
+            mysqli_stmt_execute($refresh_stmt);
+            $refresh_result = mysqli_stmt_get_result($refresh_stmt);
+            $report = mysqli_fetch_assoc($refresh_result);
+            mysqli_stmt_close($refresh_stmt);
+        } else {
+            $error = "Error updating report: " . mysqli_error($conn);
+        }
+        mysqli_stmt_close($stmt);
+    }
+}
+
+// Get comments for this report
+$comments = [];
+$comments_query = "SHOW TABLES LIKE 'comments'";
+$comments_exists = mysqli_query($conn, $comments_query);
+
+if (mysqli_num_rows($comments_exists) > 0) {
+    $comments_query = "SELECT c.*, u.username 
+                       FROM comments c
+                       JOIN users u ON c.user_id = u.user_id
+                       WHERE c.report_id = ?
+                       ORDER BY c.created_at DESC";
+    $stmt = mysqli_prepare($conn, $comments_query);
+    mysqli_stmt_bind_param($stmt, "i", $report_id);
+    mysqli_stmt_execute($stmt);
+    $comments_result = mysqli_stmt_get_result($stmt);
+    
+    while ($comment = mysqli_fetch_assoc($comments_result)) {
+        $comments[] = $comment;
+    }
+    mysqli_stmt_close($stmt);
+}
+
+// Process add comment form
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST["add_comment"])) {
+    $comment_text = trim($_POST['comment']);
+    if (!empty($comment_text)) {
+        // Check if comments table exists
+        $check_comments_table = mysqli_query($conn, "SHOW TABLES LIKE 'comments'");
+        
+        if (mysqli_num_rows($check_comments_table) == 0) {
+            // Create comments table if it doesn't exist
+            $create_comments_table = "CREATE TABLE comments (
+                id INT(11) AUTO_INCREMENT PRIMARY KEY,
+                report_id INT(11) NOT NULL,
+                user_id INT(11) NOT NULL,
+                comment TEXT NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (report_id) REFERENCES bug_reports(report_id) ON DELETE CASCADE,
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )";
+            mysqli_query($conn, $create_comments_table);
+        }
+        
+        $comment_sql = "INSERT INTO comments (report_id, user_id, comment, created_at) VALUES (?, ?, ?, NOW())";
+        $stmt = mysqli_prepare($conn, $comment_sql);
+        mysqli_stmt_bind_param($stmt, "iis", $report_id, $user_id, $comment_text);
+        
+        if (mysqli_stmt_execute($stmt)) {
+            $success = "Comment added successfully!";
+            header("Location: view_report.php?id=" . $report_id);
+            exit();
+        } else {
+            $error = "Error adding comment: " . mysqli_error($conn);
+        }
+        mysqli_stmt_close($stmt);
+    } else {
+        $error = "Comment cannot be empty!";
+    }
+}
+
+// Check if we're in edit mode
+$edit_mode = isset($_GET['edit']) && $_GET['edit'] == 'true' && $can_edit;
+?>
+
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-md-12">
+            <?php if (!empty($error)): ?>
+                <div class="alert alert-danger"><?php echo $error; ?></div>
+            <?php endif; ?>
+            
+            <?php if (!empty($success)): ?>
+                <div class="alert alert-success"><?php echo $success; ?></div>
+            <?php endif; ?>
+            
+            <div class="card mb-4">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <?php if (!$edit_mode): ?>
+                        <h2><?php echo htmlspecialchars($report['title']); ?></h2>
+                        <span class="badge bg-<?php echo get_status_color($report['status']); ?>"><?php echo ucfirst(htmlspecialchars($report['status'])); ?></span>
+                    <?php else: ?>
+                        <h2>Edit Report</h2>
+                    <?php endif; ?>
+                </div>
+                <div class="card-body">
+                    <?php if (!$edit_mode): ?>
+                        <!-- View Mode -->
+                        <div class="mb-3">
+                            <strong>Severity:</strong> 
+                            <span class="badge bg-<?php echo get_severity_class($report['severity']); ?>">
+                                <?php echo ucfirst(htmlspecialchars($report['severity'])); ?>
+                            </span>
+                        </div>
+                        
+                        <?php if (isset($report['category'])): ?>
+                        <div class="mb-3">
+                            <strong>Category:</strong> <?php echo htmlspecialchars($report['category']); ?>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <div class="mb-3">
+                            <strong>Reported By:</strong> <?php echo htmlspecialchars($report['reporter_name']); ?>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <strong>Date Submitted:</strong> <?php echo format_date($report['created_at']); ?>
+                        </div>
+                        
+                        <?php if (isset($report['updated_at'])): ?>
+                        <div class="mb-3">
+                            <strong>Last Updated:</strong> <?php echo format_date($report['updated_at']); ?>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <div class="mb-3">
+                            <strong>Description:</strong>
+                            <p class="mt-2"><?php echo nl2br(htmlspecialchars($report['description'])); ?></p>
+                        </div>
+                        
+                        <?php if (isset($report['attachment_path']) && !empty($report['attachment_path'])): ?>
+                        <div class="mb-3">
+                            <strong>Attachment:</strong>
+                            <p><a href="<?php echo htmlspecialchars($report['attachment_path']); ?>" target="_blank">View Attachment</a></p>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <?php if ($can_update_status): ?>
+                        <div class="mt-4">
+                            <h4>Update Status</h4>
+                            <form method="POST" action="">
+                                <div class="form-group">
+                                    <select name="status" class="form-control mb-2">
+                                        <option value="open" <?php echo (strtolower($report['status']) == 'open') ? 'selected' : ''; ?>>Open</option>
+                                        <option value="in_progress" <?php echo (strtolower($report['status']) == 'in_progress') ? 'selected' : ''; ?>>In Progress</option>
+                                        <option value="fixed" <?php echo (strtolower($report['status']) == 'fixed') ? 'selected' : ''; ?>>Fixed</option>
+                                        <option value="closed" <?php echo (strtolower($report['status']) == 'closed') ? 'selected' : ''; ?>>Closed</option>
+                                    </select>
+                                </div>
+                                <button type="submit" name="update_status" class="btn btn-primary">Update Status</button>
+                            </form>
+                        </div>
+                        <?php endif; ?>
+                        
+                        <div class="mt-3 mb-3">
+                            <a href="dashboard.php" class="btn btn-secondary">Back to Dashboard</a>
+                            <?php if ($can_edit): ?>
+                                <a href="view_report.php?id=<?php echo $report_id; ?>&edit=true" class="btn btn-warning">Edit Report</a>
+                            <?php endif; ?>
+                        </div>
+                    <?php else: ?>
+                        <!-- Edit Mode -->
+                        <form method="POST" action="view_report.php?id=<?php echo $report_id; ?>">
+                            <div class="form-group mb-3">
+                                <label for="title">Title</label>
+                                <input type="text" class="form-control" id="title" name="title" value="<?php echo htmlspecialchars($report['title']); ?>" required>
+                            </div>
+                            
+                            <?php if (!empty($categories)): ?>
+                            <div class="form-group mb-3">
+                                <label for="category">Category</label>
+                                <select class="form-control" id="category" name="category">
+                                    <?php foreach ($categories as $category): ?>
+                                        <?php 
+                                        $category_name = isset($category['name']) ? $category['name'] : $category;
+                                        $category_value = isset($category['id']) ? $category['id'] : $category;
+                                        $is_selected = false;
+                                        
+                                        if (isset($report['category_id']) && $report['category_id'] == $category_value) {
+                                            $is_selected = true;
+                                        } elseif (isset($report['category']) && $report['category'] == $category_name) {
+                                            $is_selected = true;
+                                        }
+                                        ?>
+                                        <option value="<?php echo htmlspecialchars($category_value); ?>" <?php echo $is_selected ? 'selected' : ''; ?>>
+                                            <?php echo htmlspecialchars($category_name); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <?php endif; ?>
+                            
+                            <div class="form-group mb-3">
+                                <label for="description">Description</label>
+                                <textarea class="form-control" id="description" name="description" rows="6" required><?php echo htmlspecialchars($report['description']); ?></textarea>
+                            </div>
+                            
+                            <div class="form-group">
+                                <button type="submit" name="update_report" class="btn btn-primary">Update Report</button>
+                                <a href="view_report.php?id=<?php echo $report_id; ?>" class="btn btn-secondary">Cancel</a>
+                            </div>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            </div>
+            
+            <?php if (!$edit_mode): ?>
+            <!-- Comments Section (only visible in view mode) -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h3>Comments (<?php echo count($comments); ?>)</h3>
+                </div>
+                <div class="card-body">
+                    <?php if (empty($comments)): ?>
+                        <p>No comments yet.</p>
+                    <?php else: ?>
+                        <?php foreach ($comments as $comment): ?>
+                            <div class="comment mb-3 p-3 border-bottom">
+                                <div class="d-flex justify-content-between">
+                                    <div>
+                                        <strong><?php echo htmlspecialchars($comment['username']); ?></strong>
+                                        <span class="text-muted"> - <?php echo format_date($comment['created_at']); ?></span>
+                                    </div>
+                                    <?php if (is_admin() || $comment['user_id'] == $user_id): ?>
+                                        <form method="post" action="view_report.php?id=<?php echo $report_id; ?>">
+                                            <input type="hidden" name="comment_id" value="<?php echo $row_comment_id; ?>">
+                                            <button type="submit" name="delete_comment" class="btn btn-danger">Delete</button>
+                                        </form>
+                                    <?php endif; ?>
+                                </div>
+                                <p class="mt-2"><?php echo nl2br(htmlspecialchars($comment['comment'])); ?></p>
+                            </div>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                    
+                    <!-- Add Comment Form -->
+                    <div class="mt-4">
+                        <h4>Add Comment</h4>
+                        <form method="POST" action="">
+                            <div class="form-group">
+                                <textarea name="comment" class="form-control mb-2" rows="3" placeholder="Write your comment here..."></textarea>
+                            </div>
+                            <button type="submit" name="add_comment" class="btn btn-primary">Submit Comment</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
+<?php require_once 'includes/footer.php'; ?>
